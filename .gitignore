@@ -19,12 +19,11 @@ venv/
 .streamlit/local_storage/
 
 # Machine Learning
-*.joblib
 *.pkl
 *.h5
 *.keras
 *.tf
-model/
+
 
 # IDEs
 .idea/
