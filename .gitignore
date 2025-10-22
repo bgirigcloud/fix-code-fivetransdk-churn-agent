@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python/
+build/
+dist/
+*.egg-info/
+.env
+.venv
+env/
+venv/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Streamlit
+.streamlit/local_storage/
+
+# Machine Learning
+*.joblib
+*.pkl
+*.h5
+*.keras
+*.tf
+model/
+
+# IDEs
+.idea/
+.vscode/
+*.iml
+
+# OS generated files
+.DS_Store
+.Trashes
+Thumbs.db
+
+# Google Cloud SDK
+google-cloud-sdk/
+*.tar.gz
+hackathon-475722-3162cfa0ae98.json
+google-cloud-sdk/hackathon-475722-3162cfa0ae98.json
+churn_agent/hackathon-475722-3162cfa0ae98.json

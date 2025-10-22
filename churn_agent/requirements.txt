@@ -1,0 +1,5 @@
+pandas
+scikit-learn
+google-cloud-bigquery
+streamlit
+db-dtypes
