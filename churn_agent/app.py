@@ -3,6 +3,8 @@ import pandas as pd
 from data_handler import get_churn_data, get_subscription_data, store_predictions
 from model_trainer import train_model
 from predictor import ChurnPredictor
+from rag_analytics import ChurnAnalyticsRAG
+from analytics_handlers import AnalyticsHandlers
 import os
 import matplotlib.pyplot as plt
 import shap
@@ -32,40 +34,80 @@ def take_action(predictions_df):
     else:
         st.write("No high-risk customers identified.")
 
+@st.cache_resource
+def get_rag_system():
+    """Initialize and cache the RAG system."""
+    return ChurnAnalyticsRAG()
+
 def answer_question(question):
-    st.subheader("Augmented Analytics Answer")
-    question = question.lower()
-
-    if "high-risk" in question or "high risk" in question:
-        st.write("Fetching high-risk customers...")
-        try:
-            predictions_df = get_churn_data(PROJECT_ID, PREDICTIONS_DATASET_ID, PREDICTIONS_TABLE_ID)
-            high_risk_customers = predictions_df[predictions_df['churn_probability'] > 0.75]
-        except Exception as e:
-            st.error(f"Could not fetch predictions from table {PREDICTIONS_DATASET_ID}.{PREDICTIONS_TABLE_ID}.")
-            st.error(f"Reason: {e}")
-
-    elif "top features" in question or "driving churn" in question:
-        st.write("Identifying top features driving churn...")
-        st.write("This feature requires a trained model and data to analyze. Please make a prediction first to see the summary plot.")
-
-    elif "latest predictions" in question:
-        st.write("Fetching latest predictions...")
-        try:
-            predictions_df = get_churn_data(PROJECT_ID, PREDICTIONS_DATASET_ID, PREDICTIONS_TABLE_ID)
-            st.dataframe(predictions_df.tail())
-        except Exception as e:
-            st.error(f"Could not fetch predictions from table {PREDICTIONS_DATASET_ID}.{PREDICTIONS_TABLE_ID}.")
-            st.error(f"Reason: {e}")
-
+    """
+    RAG-based question answering system with semantic understanding.
+    Uses vector embeddings and NLP to understand natural language queries.
+    """
+    st.subheader("🤖 Augmented Analytics Answer")
+    
+    # Initialize RAG system
+    rag = get_rag_system()
+    
+    # Fetch predictions data
+    predictions_df = None
+    try:
+        predictions_df = get_churn_data(PROJECT_ID, PREDICTIONS_DATASET_ID, PREDICTIONS_TABLE_ID)
+    except Exception as e:
+        st.warning(f"Could not fetch predictions from BigQuery: {e}")
+        st.info("Using RAG system without live data. Train a model and make predictions for full functionality.")
+    
+    # Generate response using RAG
+    with st.spinner("Understanding your question..."):
+        response = rag.generate_response(question, predictions_df)
+    
+    # Display understanding
+    confidence_color = "🟢" if response['confidence'] > 0.5 else "🟡" if response['confidence'] > 0.3 else "🔴"
+    st.write(f"{confidence_color} **Intent:** {response['description']} (Confidence: {response['confidence']:.0%})")
+    
+    # Show extracted entities if any
+    if response['entities']:
+        with st.expander("📊 Extracted Parameters"):
+            st.json(response['entities'])
+    
+    # Show context if available
+    if response.get('context'):
+        st.info(f"📈 Context: {response['context']}")
+    
+    # Execute the appropriate handler
+    if response['intent'] != 'unknown' and predictions_df is not None:
+        st.write("---")
+        handlers = AnalyticsHandlers(predictions_df)
+        handler_name = rag.get_intent_handler(response['intent'])
+        
+        if hasattr(handlers, handler_name):
+            handler_method = getattr(handlers, handler_name)
+            handler_method(response['entities'])
+        else:
+            handlers.handle_unknown(response['entities'])
+    elif response['intent'] == 'unknown':
+        st.error(response['message'])
+        st.write("### Suggestions:")
+        for suggestion in response['suggestions']:
+            st.write(f"- {suggestion}")
     else:
-        st.write("Sorry, I don't understand that question. Try questions like:")
-        st.write("- 'Show me high-risk customers'")
-        st.write("- 'What are the top features driving churn?'")
-        st.write("- 'Show me the latest predictions'")
+        st.warning("No prediction data available. Please train a model and make predictions first.")
+    
+    # Show alternative interpretations
+    if len(response.get('all_matches', [])) > 1:
+        with st.expander("🔍 Alternative Interpretations"):
+            for i, match in enumerate(response['all_matches'][1:], 2):
+                st.write(f"{i}. {match['description']} (confidence: {match['confidence']:.0%})")
 
 # --- Streamlit App --- #
-st.title("Churn Prediction Agent")
+# Display header image (contains all branding and title)
+st.image(
+    "https://storage.googleapis.com/devpost-ai-accelerate/Hackothon-devpost-ai-accelerate/ai-accelrate3.png",
+    use_container_width=True
+)
+
+# Add some spacing
+st.write("")
 
 st.sidebar.header("Actions")
 
@@ -95,10 +137,14 @@ predictor = None
 if os.path.exists(MODEL_PATH):
     try:
         predictor = ChurnPredictor(model_path=MODEL_PATH)
+        st.sidebar.success("✓ Model loaded successfully!")
     except Exception as e:
-        st.error(f"Error loading model: {e}. Please train a model first.")
+        st.error(f"Error loading model: {e}")
+        st.error("This usually happens when the model was trained with a different scikit-learn version.")
+        st.info("**Solution:** Please click 'Train New Model' in the sidebar to retrain the model with the current environment.")
+        st.warning("No predictions can be made until a new model is trained.")
 else:
-    st.warning("No trained model found. Please train a model first.")
+    st.warning("No trained model found. Please train a model first by clicking 'Train New Model' in the sidebar.")
 
 if predictor:
     if prediction_mode == "Manual Input":
@@ -140,7 +186,12 @@ if predictor:
                 st.dataframe(predictions_df)
 
                 st.write("### Prediction Explanations:")
-                st.pyplot(shap.force_plot(shap_explanation[0]))
+                # For single prediction, use waterfall plot
+                import matplotlib.pyplot as plt
+                fig, ax = plt.subplots(figsize=(10, 4))
+                shap.plots.waterfall(shap_explanation[0], show=False)
+                st.pyplot(fig)
+                plt.close()
 
                 if st.checkbox("Store Predictions in BigQuery?"):
                     store_predictions(PROJECT_ID, PREDICTIONS_DATASET_ID, PREDICTIONS_TABLE_ID, predictions_df)
@@ -151,6 +202,8 @@ if predictor:
 
             except Exception as e:
                 st.error(f"Error during manual prediction: {e}")
+                import traceback
+                st.error(traceback.format_exc())
 
     elif prediction_mode == "Upload CSV":
         st.subheader("Upload CSV for Batch Prediction")
@@ -168,7 +221,10 @@ if predictor:
                     st.dataframe(predictions_df)
 
                     st.write("### Prediction Explanations (Summary Plot):")
-                    st.pyplot(shap.summary_plot(shap_explanation, df_to_predict))
+                    fig, ax = plt.subplots(figsize=(10, 6))
+                    shap.plots.beeswarm(shap_explanation, show=False)
+                    st.pyplot(fig)
+                    plt.close()
 
                     if st.checkbox("Store Predictions in BigQuery?"):
                         store_predictions(PROJECT_ID, PREDICTIONS_DATASET_ID, PREDICTIONS_TABLE_ID, predictions_df)
@@ -178,6 +234,8 @@ if predictor:
                         take_action(predictions_df)
             except Exception as e:
                 st.error(f"Error during CSV prediction: {e}")
+                import traceback
+                st.error(traceback.format_exc())
 
     elif prediction_mode == "Real-time Prediction":
         st.subheader("Real-time Churn Prediction Simulation")

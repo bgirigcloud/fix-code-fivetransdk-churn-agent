@@ -1,7 +1,10 @@
-pandas
-scikit-learn
+pandas>=2.0.0
+scikit-learn>=1.3.0
 google-cloud-bigquery
 streamlit
 db-dtypes
 shap
 matplotlib
+joblib
+numpy<2.0
+plotly>=5.0.0
