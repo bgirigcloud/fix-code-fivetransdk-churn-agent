@@ -3,3 +3,5 @@ scikit-learn
 google-cloud-bigquery
 streamlit
 db-dtypes
+shap
+matplotlib

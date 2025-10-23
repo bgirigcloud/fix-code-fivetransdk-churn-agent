@@ -36,36 +36,22 @@ def train_model(data: pd.DataFrame, model_path: str = 'churn_model.joblib'):
     joblib.dump(model, model_path)
     print(f"Model trained and saved to {model_path}")
 
-    # Also save the list of features used for training
-    feature_names = actual_numeric_features + actual_categorical_features
-    joblib.dump(feature_names, os.path.join(os.path.dirname(model_path), 'feature_names.joblib'))
-    print(f"Feature names saved to {os.path.join(os.path.dirname(model_path), 'feature_names.joblib')}")
+
 
 
 if __name__ == '__main__':
     # This is a placeholder for demonstration. In a real scenario, you'd fetch data from BigQuery.
     # For now, let's create some dummy data.
     dummy_data = pd.DataFrame({
-        'customer_id': range(100),
-        'tenure': [i for i in range(1, 101)],
-        'monthly_charges': [10.0 + i for i in range(100)],
-        'total_charges': [100.0 + i*10 for i in range(100)],
-        'gender': ['Male' if i % 2 == 0 else 'Female' for i in range(100)],
-        'senior_citizen': [0 if i % 3 == 0 else 1 for i in range(100)],
-        'partner': ['Yes' if i % 4 == 0 else 'No' for i in range(100)],
-        'dependents': ['Yes' if i % 5 == 0 else 'No' for i in range(100)],
-        'phone_service': ['Yes' for i in range(100)],
-        'multiple_lines': ['No' if i % 2 == 0 else 'Yes' for i in range(100)],
-        'internet_service': ['DSL' if i % 3 == 0 else 'Fiber optic' for i in range(100)],
-        'online_security': ['No' if i % 2 == 0 else 'Yes' for i in range(100)],
-        'online_backup': ['Yes' if i % 3 == 0 else 'No' for i in range(100)],
-        'device_protection': ['No' if i % 4 == 0 else 'Yes' for i in range(100)],
-        'tech_support': ['Yes' if i % 5 == 0 else 'No' for i in range(100)],
-        'streaming_tv': ['No' if i % 2 == 0 else 'Yes' for i in range(100)],
-        'streaming_movies': ['Yes' if i % 3 == 0 else 'No' for i in range(100)],
-        'contract': ['Month-to-month' if i % 2 == 0 else 'Two year' for i in range(100)],
-        'paperless_billing': ['Yes' for i in range(100)],
-        'payment_method': ['Electronic check' if i % 2 == 0 else 'Mailed check' for i in range(100)],
-        'churn': [0 if i % 7 == 0 else 1 for i in range(100)] # Example churn data
+        'seats': [5, 10, 1, 20, 15] * 20,
+        'mrr_amount': [50, 100, 10, 200, 150] * 20,
+        'arr_amount': [600, 1200, 120, 2400, 1800] * 20,
+        'plan_tier': ['basic', 'premium', 'basic', 'standard', 'premium'] * 20,
+        'is_trial': [0, 0, 1, 0, 0] * 20,
+        'upgrade_flag': [0, 1, 0, 0, 1] * 20,
+        'downgrade_flag': [0, 0, 0, 1, 0] * 20,
+        'billing_frequency': ['monthly', 'annual', 'monthly', 'annual', 'monthly'] * 20,
+        'auto_renew_flag': [1, 1, 0, 1, 1] * 20,
+        'churn_flag': [0, 1, 0, 1, 0] * 20
     })
     train_model(dummy_data, model_path='./model/churn_model.joblib')
