@@ -11,7 +11,7 @@ dist/
 .venv
 env/
 venv/
-
+key.json/
 # Jupyter Notebook
 .ipynb_checkpoints
 
