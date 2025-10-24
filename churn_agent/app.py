@@ -5,9 +5,12 @@ from model_trainer import train_model
 from predictor import ChurnPredictor
 from rag_analytics import ChurnAnalyticsRAG
 from analytics_handlers import AnalyticsHandlers
+from nl_to_sql_rag import NLtoSQLRAG, format_query_results
+from chatbot_assistant import ChurnChatbot
 import os
 import matplotlib.pyplot as plt
 import shap
+import plotly.express as px
 
 # --- Configuration --- #
 PROJECT_ID = "hackathon-475722"
@@ -38,6 +41,12 @@ def take_action(predictions_df):
 def get_rag_system():
     """Initialize and cache the RAG system."""
     return ChurnAnalyticsRAG()
+
+@st.cache_resource
+def get_chatbot():
+    """Initialize and cache the chatbot assistant."""
+    # Set use_gemini=True if you have GOOGLE_API_KEY configured
+    return ChurnChatbot(project_id=PROJECT_ID, use_gemini=False)
 
 def answer_question(question):
     """
@@ -110,6 +119,13 @@ st.image(
 st.write("")
 
 st.sidebar.header("Actions")
+
+# --- AI Chatbot Assistant ---
+if st.sidebar.button("💬 AI Assistant Chat", key="chatbot_toggle"):
+    if 'show_chatbot' not in st.session_state:
+        st.session_state.show_chatbot = True
+    else:
+        st.session_state.show_chatbot = not st.session_state.show_chatbot
 
 # --- Train Model Section ---
 if st.sidebar.button("Train New Model"):
@@ -286,3 +302,249 @@ st.sidebar.header("Augmented Analytics")
 question = st.sidebar.text_input("Ask a question about your churn data")
 if st.sidebar.button("Get Answer"):
     answer_question(question)
+
+# --- Natural Language to SQL RAG Interface ---
+st.sidebar.header("🔍 Query Data with Natural Language")
+if st.sidebar.button("Open SQL Query Interface"):
+    st.session_state.show_sql_interface = True
+
+if st.session_state.get('show_sql_interface', False):
+    st.markdown("---")
+    st.header("🤖 Natural Language to SQL Query Interface")
+    st.write("Ask questions in plain English, and I'll translate them to SQL and execute them on BigQuery!")
+    
+    # Initialize NL-to-SQL RAG system
+    @st.cache_resource
+    def get_nl_to_sql_rag():
+        """Initialize and cache the NL-to-SQL RAG system."""
+        try:
+            return NLtoSQLRAG(project_id=PROJECT_ID, dataset_id=CHURN_DATASET_ID, table_id=CHURN_TABLE_ID)
+        except Exception as e:
+            st.error(f"Error initializing SQL RAG system: {e}")
+            return None
+    
+    nl_sql_rag = get_nl_to_sql_rag()
+    
+    if nl_sql_rag:
+        # Show schema information
+        with st.expander("📊 View Available Data Schema"):
+            st.markdown(nl_sql_rag.get_schema_description())
+        
+        # Show example queries
+        with st.expander("💡 Example Questions You Can Ask"):
+            examples = nl_sql_rag.get_example_queries()
+            cols = st.columns(2)
+            for i, example in enumerate(examples):
+                with cols[i % 2]:
+                    if st.button(example, key=f"example_{i}"):
+                        st.session_state.nl_query = example
+            st.info("Click any example to use it, or type your own question below!")
+        
+        # Query input
+        user_nl_query = st.text_area(
+            "🗣️ Ask your question in plain English:",
+            value=st.session_state.get('nl_query', ''),
+            height=100,
+            placeholder="e.g., How many customers do we have? What is the total revenue? Show me high-risk customers..."
+        )
+        
+        col1, col2, col3 = st.columns([2, 1, 1])
+        with col1:
+            execute_query = st.button("🚀 Execute Query", type="primary")
+        with col2:
+            if st.button("🔄 Clear"):
+                st.session_state.nl_query = ''
+                st.rerun()
+        with col3:
+            if st.button("❌ Close Interface"):
+                st.session_state.show_sql_interface = False
+                st.rerun()
+        
+        if execute_query and user_nl_query:
+            with st.spinner("🧠 Understanding your question and generating SQL..."):
+                result = nl_sql_rag.process_user_query(user_nl_query)
+            
+            # Display understanding
+            st.subheader("📝 Query Understanding")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if result['success']:
+                    st.success(f"✅ {result['message']}")
+                else:
+                    st.error(f"❌ {result['message']}")
+            
+            with col2:
+                if result['metadata'].get('confidence'):
+                    confidence = result['metadata']['confidence']
+                    confidence_pct = confidence * 100
+                    st.metric("Confidence", f"{confidence_pct:.1f}%")
+            
+            # Show extracted entities
+            if result['metadata'].get('entities'):
+                with st.expander("🎯 Extracted Parameters"):
+                    st.json(result['metadata']['entities'])
+            
+            # Display generated SQL
+            if result['sql']:
+                st.subheader("🔧 Generated SQL Query")
+                st.code(result['sql'], language='sql')
+                
+                # Add copy button functionality
+                st.caption("💡 Tip: You can copy this SQL query and use it directly in BigQuery console")
+            
+            # Display results
+            if result['success'] and result['results'] is not None:
+                st.subheader("📊 Query Results")
+                
+                results_df = result['results']
+                
+                if not results_df.empty:
+                    # Format and display results
+                    formatted_result = format_query_results(results_df)
+                    
+                    if isinstance(formatted_result, str):
+                        st.markdown(formatted_result)
+                    else:
+                        # Display as interactive dataframe
+                        st.dataframe(results_df, use_container_width=True)
+                        
+                        # Add download button
+                        csv = results_df.to_csv(index=False).encode('utf-8')
+                        st.download_button(
+                            label="📥 Download Results as CSV",
+                            data=csv,
+                            file_name="query_results.csv",
+                            mime="text/csv",
+                        )
+                        
+                        # Auto-generate visualizations for certain result types
+                        st.subheader("📈 Visualizations")
+                        
+                        # If results have numeric columns, show charts
+                        numeric_cols = results_df.select_dtypes(include=['number']).columns.tolist()
+                        
+                        if len(numeric_cols) > 0:
+                            # For grouped results (e.g., by plan, by month)
+                            if len(results_df) > 1 and len(results_df.columns) >= 2:
+                                chart_type = st.selectbox(
+                                    "Select Chart Type:",
+                                    ["Bar Chart", "Line Chart", "Pie Chart", "Table Only"]
+                                )
+                                
+                                if chart_type == "Bar Chart":
+                                    x_col = results_df.columns[0]
+                                    y_col = numeric_cols[0]
+                                    fig = px.bar(results_df, x=x_col, y=y_col, 
+                                               title=f"{y_col} by {x_col}")
+                                    st.plotly_chart(fig, use_container_width=True)
+                                
+                                elif chart_type == "Line Chart":
+                                    x_col = results_df.columns[0]
+                                    y_col = numeric_cols[0]
+                                    fig = px.line(results_df, x=x_col, y=y_col,
+                                                title=f"{y_col} Trend")
+                                    st.plotly_chart(fig, use_container_width=True)
+                                
+                                elif chart_type == "Pie Chart":
+                                    x_col = results_df.columns[0]
+                                    y_col = numeric_cols[0]
+                                    fig = px.pie(results_df, names=x_col, values=y_col,
+                                               title=f"Distribution of {y_col}")
+                                    st.plotly_chart(fig, use_container_width=True)
+                            
+                            # For single metrics, show as metric cards
+                            elif len(results_df) == 1:
+                                cols = st.columns(len(numeric_cols))
+                                for idx, col_name in enumerate(numeric_cols):
+                                    with cols[idx]:
+                                        value = results_df[col_name].iloc[0]
+                                        st.metric(label=col_name, value=f"{value:,.2f}")
+                        
+                        # Show row count
+                        st.caption(f"📝 Showing {len(results_df)} rows")
+                
+                else:
+                    st.info("Query executed successfully but returned no results.")
+        
+        elif execute_query and not user_nl_query:
+            st.warning("Please enter a question first!")
+
+# --- AI Chatbot Assistant Interface ---
+if st.session_state.get('show_chatbot', False):
+    st.markdown("---")
+    st.header("💬 AI Assistant Chat")
+    st.caption("Ask me anything about churn predictions, customer insights, or the system capabilities")
+    
+    # Initialize chatbot
+    chatbot = get_chatbot()
+    
+    # Get current prediction data for context
+    predictions_df = None
+    try:
+        predictions_df = get_churn_data(PROJECT_ID, PREDICTIONS_DATASET_ID, PREDICTIONS_TABLE_ID)
+    except:
+        pass
+    
+    # Initialize chat history in session state
+    if "chat_messages" not in st.session_state:
+        st.session_state.chat_messages = []
+    
+    # Display chat history
+    for message in st.session_state.chat_messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+    
+    # Quick action buttons
+    st.write("**Quick Questions:**")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("📊 Show high-risk customers", key="quick_high_risk"):
+            quick_question = "Which customers are most likely to churn?"
+            st.session_state.chat_messages.append({"role": "user", "content": quick_question})
+            response = chatbot.generate_response(quick_question, predictions_df, st.session_state.chat_messages)
+            st.session_state.chat_messages.append({"role": "assistant", "content": response})
+            st.rerun()
+    
+    with col2:
+        if st.button("🎯 Explain the model", key="quick_model"):
+            quick_question = "How does the churn prediction model work?"
+            st.session_state.chat_messages.append({"role": "user", "content": quick_question})
+            response = chatbot.generate_response(quick_question, predictions_df, st.session_state.chat_messages)
+            st.session_state.chat_messages.append({"role": "assistant", "content": response})
+            st.rerun()
+    
+    with col3:
+        if st.button("💰 Revenue at risk", key="quick_revenue"):
+            quick_question = "How much revenue is at risk from churn?"
+            st.session_state.chat_messages.append({"role": "user", "content": quick_question})
+            response = chatbot.generate_response(quick_question, predictions_df, st.session_state.chat_messages)
+            st.session_state.chat_messages.append({"role": "assistant", "content": response})
+            st.rerun()
+    
+    # Chat input
+    if user_prompt := st.chat_input("Ask me anything about churn predictions..."):
+        # Add user message to history and display
+        st.session_state.chat_messages.append({"role": "user", "content": user_prompt})
+        with st.chat_message("user"):
+            st.markdown(user_prompt)
+        
+        # Generate and display assistant response
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                response = chatbot.generate_response(
+                    user_prompt, 
+                    predictions_df,
+                    st.session_state.chat_messages
+                )
+            st.markdown(response)
+        
+        # Add assistant response to history
+        st.session_state.chat_messages.append({"role": "assistant", "content": response})
+    
+    # Clear chat button
+    if st.button("🗑️ Clear Chat History", key="clear_chat"):
+        st.session_state.chat_messages = []
+        chatbot.reset_conversation()
+        st.rerun()

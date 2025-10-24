@@ -182,7 +182,7 @@ def main():
     
     # Get configuration from environment variables or use defaults
     gcs_bucket = os.environ.get("GCS_BUCKET_NAME", GCS_BUCKET_NAME)
-    gcs_file = os.environ.get("GCS_FILE_PATH", "subscriptions.csv")
+    gcs_file = os.environ.get("GCS_FILE_PATH", "ravenstack_subscriptions.csv")
     bq_project = os.environ.get("BIGQUERY_PROJECT_ID", BIGQUERY_PROJECT_ID)
     bq_dataset = os.environ.get("BIGQUERY_DATASET_ID", BIGQUERY_DATASET_ID)
     bq_table = os.environ.get("BIGQUERY_TABLE_NAME", "gcs_subscriptions")
